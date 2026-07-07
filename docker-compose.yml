@@ -1,0 +1,22 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - '8082:8082'
+    env_file:
+      - .env
+    environment:
+      HTTP_PORT: '8082'
+      # Reach the PostgreSQL running on the host (overrides DB_HOST=localhost from .env).
+      DB_HOST: host.docker.internal
+    extra_hosts:
+      - 'host.docker.internal:host-gateway' # Linux support for the hostname above
+    volumes:
+      - .:/app # live source for hot reload
+      - go-mod-cache:/go/pkg/mod # cache modules across restarts
+    restart: unless-stopped
+
+volumes:
+  go-mod-cache:

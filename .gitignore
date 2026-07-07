@@ -1,0 +1,13 @@
+# Build artifacts
+/bin/
+/tmp/
+/data/
+server
+
+# Session store / SQLite
+*.db
+*.db-shm
+*.db-wal
+
+# Secrets
+.env
