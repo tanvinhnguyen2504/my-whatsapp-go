@@ -38,6 +38,10 @@ type Config struct {
 
 	// Webhook (used by the Business workflow's verification handshake).
 	WebhookVerifyToken string
+
+	// Google Cloud
+	GoogleCloudProjectID  string
+	GoogleCloudBucketName string
 }
 
 func Load() (Config, error) {
@@ -57,6 +61,8 @@ func Load() (Config, error) {
 		BusinessAccessToken:   os.Getenv("WHATSAPP_BUSINESS_ACCESS_TOKEN"),
 		BusinessAPIVersion:    env("WHATSAPP_BUSINESS_API_VERSION", "v21.0"),
 		WebhookVerifyToken:    os.Getenv("WHATSAPP_API_WEBHOOK_VERIFY_TOKEN"),
+		GoogleCloudProjectID:  env("STORAGE_PROJECT_ID", ""),
+		GoogleCloudBucketName: env("STORAGE_BUCKET_NAME", ""),
 	}
 
 	if err := cfg.validate(); err != nil {

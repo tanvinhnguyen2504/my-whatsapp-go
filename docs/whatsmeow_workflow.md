@@ -1,37 +1,42 @@
-# Workflow: Xây dựng WhatsApp Server với whatsmeow (số điện thoại chính chủ)
+# Workflow: Building a WhatsApp Server with whatsmeow (personal phone number)
 
-> **Phạm vi:** Tài liệu mô tả kiến trúc và quy trình xây dựng một server Go đại diện cho **một số WhatsApp cá nhân chính chủ**, dùng thư viện unofficial `go.mau.fi/whatsmeow` — nhận tin nhắn real-time (thay thế webhook) và gửi tin nhắn qua HTTP API nội bộ.
+> **Scope:** This document describes the architecture and process of building a Go server that
+> represents **one personal WhatsApp number**, using the unofficial `go.mau.fi/whatsmeow`
+> library — receiving messages in real time (replacing webhooks) and sending messages via an
+> internal HTTP API.
 >
-> **KHÔNG dùng** WhatsApp Cloud API chính thức. Xem tài liệu `whatsapp-cloud-api-webhook-workflow.md` nếu cần phương án chính thức.
+> **Does NOT use** the official WhatsApp Cloud API. See `whatsapp-cloud-api-webhook-workflow.md`
+> if you need the official approach.
 
 ---
 
-## 1. Khái niệm nền tảng — khác biệt với Cloud API
+## 1. Core concept — differences from the Cloud API
 
-| | Cloud API (chính thức) | whatsmeow (unofficial) |
+| | Cloud API (official) | whatsmeow (unofficial) |
 |---|---|---|
-| Bản chất | Gọi Graph API của Meta | Server **giả lập một linked device** (như WhatsApp Web) |
-| Nhận tin | Meta POST vào webhook URL công khai | **Push real-time qua WebSocket** → event handler nội bộ |
-| Cần HTTPS công khai? | Bắt buộc | **Không** — server có thể nằm sau NAT/private network |
-| Số điện thoại | Test number / số business đăng ký WABA | Số cá nhân chính chủ, pair qua QR |
-| Template / phí | Bắt buộc template ngoài cửa sổ 24h, tính phí | Không template, không phí |
-| Rủi ro | Không | **Vi phạm ToS — số cá nhân có thể bị khóa** nếu hành vi bất thường |
-| Scale | Ngang (stateless webhook) | **Dọc — 1 session = 1 tiến trình duy nhất** |
+| Nature | Calls Meta's Graph API | Server **emulates a linked device** (like WhatsApp Web) |
+| Receiving | Meta POSTs to a public webhook URL | **Real-time push over WebSocket** → in-process event handler |
+| Needs public HTTPS? | Required | **No** — the server can sit behind NAT / a private network |
+| Phone number | Test number / WABA-registered business number | Personal number, paired via QR |
+| Templates / fees | Templates required outside the 24h window, charged | No templates, no fees |
+| Risk | None | **ToS violation — the personal number can be banned** on abnormal behavior |
+| Scaling | Horizontal (stateless webhook) | **Vertical — 1 session = a single process** |
 
-**Hệ quả kiến trúc quan trọng:** không có "webhook từ Meta". "Webhook" trong hệ thống này là **event handler + dispatcher nội bộ** do ta tự xây.
+**Key architectural consequence:** there is no "webhook from Meta". The "webhook" in this system
+is an **in-process event handler + dispatcher** that you build yourself.
 
 ---
 
-## 2. Kiến trúc tổng thể
+## 2. Overall architecture
 
 ```
-[Điện thoại chính chủ]        [WhatsApp servers]           [Server Go]
+[Personal phone]             [WhatsApp servers]           [Go server]
   (WhatsApp app)                                        (linked device)
         |                            |                          |
-        |---- pair QR (1 lần) ----->|<===== WebSocket ========>|
+        |---- pair QR (once) ------>|<===== WebSocket ========>|
         |                            |      (E2E encrypted)     |
                                      |                          |
-[Người nhận] ---- nhắn tin -------->|--- events.Message ------>| EventHandler
+[Recipient] ------ messages ------->|--- events.Message ------>| EventHandler
                                      |                          |     |
         <--------------------------- |<--- SendMessage ---------| Dispatcher
                                      |                          |     |
@@ -42,27 +47,28 @@
                                      |                   [Media Resolver (GCS)]
 ```
 
-**Các thành phần:**
+**Components:**
 
-| Thành phần | Vai trò |
+| Component | Role |
 |---|---|
-| **whatsmeow Client** | Giữ WebSocket, mã hóa Signal, gửi/nhận message |
-| **SQL Store** | Lưu session + khóa mã hóa (SQLite / Postgres) — mất là phải pair lại |
-| **EventHandler** | Nhận mọi event, lọc, đẩy vào queue nội bộ |
-| **Dispatcher** | Chuyển event → payload chuẩn hóa → forward cho bot logic |
-| **HTTP Send API** | Endpoint nội bộ để hệ thống khác gửi tin qua số của ta |
-| **Media Resolver** | Lấy bytes từ GCS, upload lên WhatsApp, cache theo generation |
+| **whatsmeow Client** | Holds the WebSocket, Signal encryption, sends/receives messages |
+| **SQL Store** | Stores the session + encryption keys (SQLite / Postgres) — lose it and you must re-pair |
+| **EventHandler** | Receives every event, filters, pushes to an internal queue |
+| **Dispatcher** | Turns events → normalized payload → forwards to bot logic |
+| **HTTP Send API** | Internal endpoint for other systems to send messages via your number |
+| **Media Resolver** | Fetches bytes from GCS, uploads to WhatsApp, caches by generation |
 
 ---
 
-## 3. Giai đoạn 1 — Pairing (thực hiện một lần)
+## 3. Phase 1 — Pairing (done once)
 
-Sau `client.Connect()`, client sẽ tự authenticate nếu store đã có session; nếu chưa, phát QR event để thiết lập liên kết mới.
+After `client.Connect()`, the client authenticates automatically if the store already has a
+session; if not, it emits a QR event to establish a new link.
 
-**Cách A — QR code (khuyên dùng lần đầu):**
+**Option A — QR code (recommended for the first time):**
 
 ```go
-if client.Store.ID == nil { // chưa có session
+if client.Store.ID == nil { // no session yet
     qrChan, _ := client.GetQRChannel(context.Background())
     err = client.Connect()
     // ...
@@ -74,108 +80,135 @@ if client.Store.ID == nil { // chưa có session
         }
     }
 } else {
-    err = client.Connect() // đã có session, connect thẳng
+    err = client.Connect() // session exists, connect directly
 }
 ```
 
-Trên điện thoại: **Settings → Linked Devices → Link a Device** → quét QR.
+On the phone: **Settings → Linked Devices → Link a Device** → scan the QR.
 
-**Cách B — Pairing code (server headless):** dùng `client.PairPhone(phone, true, ...)` để sinh mã, nhập trên điện thoại thay vì quét QR. Lưu ý phải `Connect()` trước khi gọi (QR event vẫn phát ra nhưng bỏ qua được).
+**Option B — Pairing code (headless server):** use `client.PairPhone(phone, true, ...)` to
+generate a code and enter it on the phone instead of scanning a QR. Note you must `Connect()`
+before calling it (the QR event is still emitted but can be ignored).
 
-**Sau khi pair:**
-- Điện thoại KHÔNG cần online liên tục (multi-device protocol).
-- Điện thoại offline > ~14 ngày → linked device bị ngắt → phải pair lại.
-- Server chiếm 1 slot trong tối đa 4 linked devices của tài khoản.
+**After pairing:**
+- The phone does NOT need to stay online continuously (multi-device protocol).
+- Phone offline > ~14 days → the linked device is disconnected → you must re-pair.
+- The server takes 1 slot out of the account's maximum of 4 linked devices.
 
 ---
 
-## 4. Giai đoạn 2 — Session persistence
+## 4. Phase 2 — Session persistence
 
-Whatsmeow **bắt buộc** có storage backend; không có thì mỗi lần restart phải quét QR mới. SQL store hỗ trợ SQLite và PostgreSQL.
+Whatsmeow **requires** a storage backend; without one you have to scan a new QR on every
+restart. The SQL store supports SQLite and PostgreSQL.
 
 ```go
-// SQLite (1 instance, đơn giản):
+// SQLite (single instance, simple):
 container, err := sqlstore.New(ctx, "sqlite3",
     "file:/data/wa-session.db?_foreign_keys=on", dbLog)
-// nhớ import _ "github.com/mattn/go-sqlite3"
+// remember to import _ "github.com/mattn/go-sqlite3"
 
-deviceStore, err := container.GetFirstDevice(ctx) // chỉ 1 số → GetFirstDevice
+deviceStore, err := container.GetFirstDevice(ctx) // only one number → GetFirstDevice
 client := whatsmeow.NewClient(deviceStore, clientLog)
 ```
 
-**Lựa chọn theo hạ tầng:**
+**Choosing by infrastructure:**
 
-| Deploy | Store | Ghi chú |
+| Deploy | Store | Notes |
 |---|---|---|
-| GCE VM / GKE + PVC | SQLite trên persistent disk | Đơn giản nhất |
-| Container stateless-ish | Cloud SQL Postgres (driver `pgx`) | Restart/reschedule không mất session |
-| ❌ Cloud Run scale-to-zero | — | KHÔNG phù hợp: cần WebSocket sống 24/7 |
+| GCE VM / GKE + PVC | SQLite on a persistent disk | Simplest |
+| Stateless-ish container | Cloud SQL Postgres (`pgx` driver) | Restart/reschedule without losing the session |
+| ❌ Cloud Run scale-to-zero | — | NOT suitable: needs a live WebSocket 24/7 |
 
-**Quy tắc vàng:**
-- ⛔ Không bao giờ xóa/mất store DB → mất là pair lại, pair/unpair lặp lại là red flag với Meta.
-- ⛔ Không chạy 2 tiến trình cùng trỏ vào 1 session → xung đột, có thể bị logout.
-- ✅ Backup store DB định kỳ (chứa khóa mã hóa — bảo vệ như secret).
+**Golden rules:**
+- ⛔ Never delete/lose the store DB → losing it means re-pairing, and repeated pair/unpair is a red flag to Meta.
+- ⛔ Do not run 2 processes pointing at the same session → conflict, possible logout.
+- ✅ Back up the store DB regularly (it holds encryption keys — protect it like a secret).
 
 ---
 
-## 5. Giai đoạn 3 — Event loop (thay thế webhook)
+## 5. Phase 3 — Event loop (replacing the webhook)
 
-Đăng ký handler qua `AddEventHandler`; mọi handler nhận **tất cả** event, switch theo type. Pattern chuẩn khi handler cần dùng Client — bọc trong struct:
+Register a handler via `AddEventHandler`; every handler receives **all** events, switching by
+type. The standard pattern when the handler needs the Client — wrap it in a struct:
 
 ```go
 type WAService struct {
     WAClient  *whatsmeow.Client
-    Inbox     chan *events.Message // queue nội bộ
+    Inbox     chan *events.Message // internal queue
 }
 
 func (s *WAService) handler(evt any) {
     switch v := evt.(type) {
     case *events.Message:
-        // === CÁC BỘ LỌC BẮT BUỘC ===
-        if v.Info.IsFromMe { return }          // tin do chính mình gửi (từ điện thoại)
-        if v.Info.IsGroup { return }           // bỏ group nếu chỉ xử lý 1-1 (tùy nhu cầu)
-        // Bỏ qua history sync: chỉ nhận tin real-time
+        // === REQUIRED FILTERS ===
+        if v.Info.IsFromMe { return }          // messages you sent yourself (from the phone)
+        if v.Info.IsGroup { return }           // skip groups if only handling 1-1 (as needed)
+        // Skip history sync: only accept real-time messages
         select {
-        case s.Inbox <- v:                     // đẩy queue, return ngay
+        case s.Inbox <- v:                     // push to queue, return immediately
         default:
-            // queue đầy → log + metric, không block event loop
+            // queue full → log + metric, do not block the event loop
         }
     case *events.Receipt:
-        // delivered / read receipts nếu cần tracking
+        // delivered / read receipts if tracking is needed
     case *events.Disconnected:
-        // metric + log; AutoReconnect sẽ tự xử lý
+        // metric + log; AutoReconnect will handle it
     case *events.LoggedOut:
-        // NGHIÊM TRỌNG: session chết, phải pair lại → alert ngay
+        // CRITICAL: session dead, must re-pair → alert immediately
     }
 }
 ```
 
-**Nguyên tắc:** handler phải **return nhanh** — mọi xử lý nặng (LLM, DB, gửi reply, resolve media) chạy ở worker goroutine đọc từ `Inbox`.
+**Principle:** the handler must **return quickly** — all heavy work (LLM, DB, sending replies,
+resolving media) runs in a worker goroutine reading from `Inbox`.
 
-**Trích xuất nội dung tin đến:**
+**Extracting incoming message content:**
 
 ```go
 msg := v.Message
 switch {
 case msg.GetConversation() != "":            text = msg.GetConversation()
 case msg.GetExtendedTextMessage() != nil:    text = msg.GetExtendedTextMessage().GetText()
-case msg.GetImageMessage() != nil:           data, _ = client.Download(msg.GetImageMessage())
-case msg.GetAudioMessage() != nil:           data, _ = client.Download(msg.GetAudioMessage())
-// ... DocumentMessage, VideoMessage tương tự
+case msg.GetImageMessage() != nil:           data, _ = client.Download(ctx, msg.GetImageMessage())
+case msg.GetAudioMessage() != nil:           data, _ = client.Download(ctx, msg.GetAudioMessage())
+// ... DocumentMessage, VideoMessage, StickerMessage similarly
 }
 ```
 
+> The five media sub-structs (`Image/Video/Audio/Document/StickerMessage`) all satisfy the
+> `whatsmeow.DownloadableMessage` interface, so `client.Download(ctx, part)` fetches the ciphertext
+> from WhatsApp's CDN, decrypts it with the message's `MediaKey`, and verifies `FileSHA256`. You
+> cannot HTTP-GET the media URL directly — it is E2E-encrypted.
+
+### Receiving media in this repo
+
+Implemented in `internal/whatsapp/whatsmeow_provider.go` (`handleMessage` → `downloadableMedia`
+→ `saveIncomingMedia`):
+
+1. `downloadableMedia` returns the first non-nil media part plus its kind, mimetype, filename
+   (documents), and caption; non-media messages are skipped.
+2. `saveIncomingMedia` calls `client.Download(ctx, part)` and writes the decrypted bytes under
+   `received_media/`.
+3. Files are named by WhatsApp message ID (`v.Info.ID`, unique → no collisions) with an extension
+   derived from the mimetype; documents keep their original name.
+
+> **Security — path traversal:** the document filename and message ID both come from the *remote
+> sender* and are untrusted. `safeBaseName` reduces each to its final path component and rejects
+> `.`/`..`/separators, so a document named `../../etc/passwd` cannot escape `received_media/`.
+
 ---
 
-## 6. Giai đoạn 4 — Dispatcher ("webhook nội bộ")
+## 6. Phase 4 — Dispatcher ("internal webhook")
 
-Mục tiêu: **bot logic không cần biết** tin đến từ whatsmeow hay Cloud API.
+Goal: **bot logic should not need to know** whether a message came from whatsmeow or the Cloud API.
 
-Worker đọc `Inbox` → chuẩn hóa thành payload (khuyên dùng: **mô phỏng format webhook Cloud API** `entry[].changes[].value.messages[]`) → forward:
+A worker reads `Inbox` → normalizes it into a payload (recommended: **mimic the Cloud API webhook
+format** `entry[].changes[].value.messages[]`) → forwards it:
 
-- **HTTP POST** vào endpoint nội bộ sẵn có của hệ thống, hoặc
-- **Pub/Sub topic** (đã ở Google Cloud) nếu muốn decouple hoàn toàn, hoặc
-- Gọi trực tiếp hàm bot logic nếu cùng tiến trình.
+- **HTTP POST** to the system's existing internal endpoint, or
+- **Pub/Sub topic** (already on Google Cloud) for full decoupling, or
+- A direct call to the bot logic function if in the same process.
 
 ```
 events.Message ──> normalize() ──> {from, wamid, type, text|media, ts}
@@ -185,95 +218,100 @@ events.Message ──> normalize() ──> {from, wamid, type, text|media, ts}
               POST /internal      Pub/Sub topic      direct func call
 ```
 
-**Idempotency:** dedupe theo `v.Info.ID` (wamid) trước khi xử lý — retry/reconnect có thể phát lại event.
+**Idempotency:** dedupe by `v.Info.ID` (wamid) before processing — retries/reconnects may replay
+events.
 
 ---
 
-## 7. Giai đoạn 5 — HTTP Send API
+## 7. Phase 5 — HTTP Send API
 
-Endpoint nội bộ để các service khác gửi tin "dưới danh nghĩa" số của ta:
+An internal endpoint for other services to send messages "on behalf of" your number:
 
 ```
 POST /send
 {
   "to": "8490xxxxxxx",
   "type": "text" | "image" | "audio" | "document",
-  "text": "...",              // khi type=text
-  "media_ref": "gs://bucket/object",  // khi type=media → qua Media Resolver
+  "text": "...",              // when type=text
+  "media_ref": "gs://bucket/object",  // when type=media → via Media Resolver
   "caption": "..."
 }
 ```
 
 ```go
-jid := types.NewJID(req.To, types.DefaultUserServer) // số → JID
+jid := types.NewJID(req.To, types.DefaultUserServer) // number → JID
 resp, err := client.SendMessage(ctx, jid, &waE2E.Message{
     Conversation: proto.String(req.Text),
 })
 ```
 
-Với media: Resolver (GCS) → check cache theo `bucket/object#generation` → `client.Upload()` → build `waE2E.ImageMessage`/... → `SendMessage`. (Chi tiết ở tài liệu Media Resolver.)
+For media: Resolver (GCS) → check cache by `bucket/object#generation` → `client.Upload()` →
+build `waE2E.ImageMessage`/... → `SendMessage`. (Details in the Media Resolver doc.)
 
-**Bảo mật bắt buộc:** endpoint này = quyền nhắn tin bằng số cá nhân của bạn.
-- API key / IAM / mTLS, chỉ expose trong VPC nội bộ.
-- Rate limit toàn cục (`golang.org/x/time/rate`).
-- Audit log mọi request gửi.
+**Mandatory security:** this endpoint = permission to message using your personal number.
+- API key / IAM / mTLS, only expose inside a private VPC.
+- Global rate limiting (`golang.org/x/time/rate`).
+- Audit-log every send request.
 
 ---
 
-## 8. Giai đoạn 6 — Vận hành & độ tin cậy
+## 8. Phase 6 — Operations & reliability
 
-| Hạng mục | Cách làm |
+| Item | How |
 |---|---|
-| Reconnect | Whatsmeow có sẵn AutoReconnect với backoff; vẫn lắng nghe `events.Disconnected` để đo đếm |
-| Logout | `events.LoggedOut` → alert PagerDuty/Slack ngay, cần pair lại thủ công |
-| Health check | Endpoint `/healthz` trả theo `client.IsConnected()` |
-| Deploy | **1 replica duy nhất**, restart policy `always`; KHÔNG scale ngang |
-| Graceful shutdown | Bắt SIGTERM → `client.Disconnect()` → flush queue |
-| Media hết hạn | Download tin cũ gặp 404/410 → `SendMediaRetryReceipt` yêu cầu điện thoại re-upload |
-| Timeout | `SendMessage` mặc định chờ response 75s — tách context của bước GCS read và bước send |
+| Reconnect | Whatsmeow has built-in AutoReconnect with backoff; still listen to `events.Disconnected` for metrics |
+| Logout | `events.LoggedOut` → alert PagerDuty/Slack immediately, requires manual re-pair |
+| Health check | A `/healthz` endpoint that reflects `client.IsConnected()` |
+| Deploy | **Exactly 1 replica**, restart policy `always`; do NOT scale horizontally |
+| Graceful shutdown | Catch SIGTERM → `client.Disconnect()` → flush the queue |
+| Expired media | Downloading old messages hits 404/410 → `SendMediaRetryReceipt` asks the phone to re-upload |
+| Timeout | `SendMessage` waits 75s for a response by default — separate the context of the GCS-read step from the send step |
 
 ---
 
-## 9. Giảm rủi ro khóa số (QUAN TRỌNG — số chính chủ)
+## 9. Reducing ban risk (IMPORTANT — personal number)
 
-Đây là thư viện unofficial, vi phạm ToS của WhatsApp. Mọi tin bot gửi ra là "bạn" đang nhắn. Nguyên tắc hành xử:
+This is an unofficial library that violates WhatsApp's ToS. Every message the bot sends is "you"
+messaging. Behavior guidelines:
 
-1. **Chỉ reply, hạn chế initiate:** ưu tiên trả lời tin nhắn đến; không gửi hàng loạt tới số lạ chưa từng chat.
-2. **Hành vi giống người:** gửi `client.MarkRead(...)` khi nhận tin, `client.SendChatPresence(jid, types.ChatPresenceComposing, ...)` (đang nhập...) 1–3 giây trước khi reply, delay ngẫu nhiên giữa các tin.
-3. **Rate limit cứng:** cap số tin/phút toàn hệ thống, bất kể nguồn request.
-4. **Không pair/unpair liên tục**, không đổi IP server thất thường (giữ IP tĩnh/NAT ổn định).
-5. **Đường lui:** thiết kế interface `MessageSender` với 2 implementation (`WhatsmeowSender`, `CloudAPISender`) — khi cần chính thức hóa, chuyển sang Cloud API mà không sửa bot logic.
+1. **Reply only, limit initiating:** prioritize replying to incoming messages; do not mass-send to unknown numbers you've never chatted with.
+2. **Human-like behavior:** send `client.MarkRead(...)` on receiving a message, `client.SendChatPresence(jid, types.ChatPresenceComposing, ...)` (typing…) 1–3 seconds before replying, and random delays between messages.
+3. **Hard rate limit:** cap messages/minute across the whole system, regardless of request source.
+4. **Do not pair/unpair repeatedly**, and don't change the server IP erratically (keep a static IP / stable NAT).
+5. **Fallback path:** design a `MessageSender` interface with 2 implementations (`WhatsmeowSender`, `CloudAPISender`) — when you need to go official, switch to the Cloud API without changing bot logic.
 
 ---
 
-## 10. Checklist triển khai
+## 10. Deployment checklist
 
-- [ ] SQL store persistent (SQLite/PVC hoặc Cloud SQL), có backup
-- [ ] Pairing thành công, session tự khôi phục sau restart (test: kill process → start → không cần QR)
-- [ ] EventHandler lọc `IsFromMe`, group, history sync; đẩy queue non-blocking
-- [ ] Dispatcher chuẩn hóa payload + dedupe theo wamid
-- [ ] HTTP Send API có auth + rate limit, chỉ trong mạng nội bộ
-- [ ] Media Resolver GCS cắm vào luồng send (cache theo generation)
-- [ ] Alert cho `events.LoggedOut`; health check theo `IsConnected()`
+- [ ] Persistent SQL store (SQLite/PVC or Cloud SQL), with backups
+- [ ] Pairing successful, session auto-recovers after restart (test: kill process → start → no QR needed)
+- [ ] EventHandler filters `IsFromMe`, groups, history sync; pushes to the queue non-blocking
+- [ ] Dispatcher normalizes the payload + dedupes by wamid
+- [ ] HTTP Send API has auth + rate limiting, only on the internal network
+- [ ] Media Resolver GCS plugged into the send flow (cache by generation)
+- [ ] Alerts for `events.LoggedOut`; health check based on `IsConnected()`
 - [ ] Deploy 1 replica, graceful shutdown, restart always
-- [ ] Interface `MessageSender` trừu tượng hóa backend (whatsmeow ↔ Cloud API)
+- [ ] `MessageSender` interface abstracts the backend (whatsmeow ↔ Cloud API)
 
 ---
 
-## Phụ lục — go.mod tối thiểu
+## Appendix — minimal go.mod
 
 ```
 require (
     go.mau.fi/whatsmeow latest
-    github.com/mattn/go-sqlite3 latest        // hoặc jackc/pgx cho Postgres
-    github.com/mdp/qrterminal/v3 latest       // render QR ra terminal
+    github.com/mattn/go-sqlite3 latest        // or jackc/pgx for Postgres
+    github.com/mdp/qrterminal/v3 latest       // render the QR to the terminal
     google.golang.org/protobuf latest
     cloud.google.com/go/storage latest        // Media Resolver
 )
 ```
 
-Packages chính: `go.mau.fi/whatsmeow`, `go.mau.fi/whatsmeow/store/sqlstore`, `go.mau.fi/whatsmeow/types`, `go.mau.fi/whatsmeow/types/events`, `go.mau.fi/whatsmeow/proto/waE2E`.
+Main packages: `go.mau.fi/whatsmeow`, `go.mau.fi/whatsmeow/store/sqlstore`,
+`go.mau.fi/whatsmeow/types`, `go.mau.fi/whatsmeow/types/events`, `go.mau.fi/whatsmeow/proto/waE2E`.
 
 ---
 
-*Cập nhật: 2026-07. Tham khảo: godoc go.mau.fi/whatsmeow; GitHub tulir/whatsmeow (mdtest example, WhatsApp protocol Q&A trong Discussions).*
+*Updated: 2026-07. References: godoc go.mau.fi/whatsmeow; GitHub tulir/whatsmeow (mdtest example,
+WhatsApp protocol Q&A in Discussions).*

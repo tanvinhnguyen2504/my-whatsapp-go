@@ -72,21 +72,6 @@ func (h *Handler) sendMedia(c *gin.Context) {
 	kind := whatsapp.MediaKind(c.PostForm("kind"))
 	caption := c.PostForm("caption")
 
-	// type payload struct {
-	// 	to      string
-	// 	kind    whatsapp.MediaKind
-	// 	caption string
-	// }
-
-	// test := payload{
-	// 	to:      to,
-	// 	kind:    kind,
-	// 	caption: caption,
-	// }
-
-	// fmt.Println("[DEBUG]-test")
-	// pkg.DebugJson(test)
-
 	file, err := c.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -129,9 +114,6 @@ func (h *Handler) sendMedia(c *gin.Context) {
 		FileName: file.Filename,
 		Caption:  caption,
 	}
-
-	// fmt.Println("[DEBUG]-payload to send the media..")
-	// pkg.DebugJson(payload)
 
 	result, err := h.provider.SendMedia(c.Request.Context(), to, payload)
 	if err != nil {

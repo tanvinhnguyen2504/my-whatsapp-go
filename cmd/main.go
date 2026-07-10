@@ -25,6 +25,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	// storageService, _ := storage.NewStorageService(cfg.GoogleCloudBucketName, cfg.GoogleCloudProjectID, "")
 	provider, err := whatsapp.New(cfg)
 	if err != nil {
 		slog.Error("build provider", "error", err)

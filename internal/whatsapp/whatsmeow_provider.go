@@ -5,6 +5,10 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"mime"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"go.mau.fi/whatsmeow"
@@ -15,7 +19,6 @@ import (
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
 
-	// Pure-Go Postgres driver (no CGO). Registered under the name "pgx".
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -25,7 +28,7 @@ type WhatsMeowProvider struct {
 	client *whatsmeow.Client
 
 	mu     sync.RWMutex
-	qrCode string // latest QR string while waiting to be paired
+	qrCode string
 }
 
 func NewWhatsMeowProvider(postgresDSN string) *WhatsMeowProvider {
@@ -53,7 +56,7 @@ func (p *WhatsMeowProvider) Connect(ctx context.Context) error {
 	}
 
 	p.client = whatsmeow.NewClient(device, waLog.Stdout("Client", "INFO", true))
-	p.client.AddEventHandler(p.handleEvent)
+	p.client.AddEventHandler(p.eventHandler)
 
 	if p.client.Store.ID == nil {
 		return p.pairAndConnect(ctx)
@@ -243,19 +246,163 @@ func buildMediaMessage(m MediaMessage, up whatsmeow.UploadResponse) *waE2E.Messa
 	}
 }
 
-func (p *WhatsMeowProvider) handleEvent(evt any) {
-	switch e := evt.(type) {
-	case *events.Message:
-		slog.Info("incoming message",
+func (p *WhatsMeowProvider) eventHandler(rawEvt any) {
+	fmt.Println("Case inbound messages...")
+	// switch evt := rawEvt.(type) {
+	// case *events.Message:
+	// 	{
+	// 		var messageType, messageContent string
+	// 		var mediaMessage *MediaMessage
+
+	// 		messageType = evt.Info.Type
+	// 		switch messageType {
+	// 		case MessageTypeText:
+	// 		case MessageTypeMedia:
+	// 			switch evt.Info.MediaType {
+	// 			case MessageMediaTypeUrl:
+	// 				messageContent = evt.Message.GetExtendedTextMessage().GetText()
+	// 			case MessageMediaTypeImage:
+	// 				{
+
+	// 				}
+	// 			case MessageMediaTypeAudio, MessageMediaTypePtt:
+	// 				{
+
+	// 				}
+	// 			case MessageMediaTypeVideo, MessageMediaTypeGif:
+	// 				{
+
+	// 				}
+	// 			case MessageMediaTypeDocument:
+	// 				{
+
+	// 				}
+	// 			case MessageMediaTypeSticker, MessageMediaType1pSticker:
+	// 				{
+
+	// 				}
+	// 				// do nothing for other media types
+	// 			}
+	// 		case MessageTypePoll, MessageTypeReaction:
+	// 			// do nothing...
+	// 		}
+	// 	}
+	// case *events.Connected:
+	// 	slog.Info("whatsapp connected")
+	// case *events.LoggedOut:
+	// 	slog.Warn("whatsapp logged out; QR re-pairing required")
+	// }
+}
+
+const receivedMediaDir = "received_media"
+
+func (p *WhatsMeowProvider) handleMessage(e *events.Message) {
+	if text := e.Message.GetConversation(); text != "" {
+		slog.Info("incoming text",
 			"from", e.Info.Sender.String(),
 			"chat", e.Info.Chat.String(),
-			"text", e.Message.GetConversation(),
+			"text", text,
 		)
-	case *events.Connected:
-		slog.Info("whatsapp connected")
-	case *events.LoggedOut:
-		slog.Warn("whatsapp logged out; QR re-pairing required")
+		return
 	}
+
+	fmt.Println(e.Message, "e.Message...")
+
+	media, ok := downloadableMedia(e.Message)
+	if !ok {
+		return
+	}
+
+	path, err := p.saveIncomingMedia(context.Background(), e.Info.ID, media)
+	if err != nil {
+		slog.Error("save incoming media", "from", e.Info.Sender.String(), "error", err)
+		return
+	}
+	slog.Info("saved incoming media",
+		"from", e.Info.Sender.String(),
+		"chat", e.Info.Chat.String(),
+		"kind", media.kind,
+		"mimetype", media.mimetype,
+		"caption", media.caption,
+		"path", path,
+	)
+}
+
+func downloadableMedia(m *waE2E.Message) (IncomingMedia, bool) {
+	switch {
+	case m.GetImageMessage() != nil:
+		im := m.GetImageMessage()
+		return IncomingMedia{im, MediaImage, im.GetMimetype(), "", im.GetCaption()}, true
+	case m.GetVideoMessage() != nil:
+		vm := m.GetVideoMessage()
+		return IncomingMedia{vm, MediaVideo, vm.GetMimetype(), "", vm.GetCaption()}, true
+	case m.GetAudioMessage() != nil:
+		am := m.GetAudioMessage()
+		return IncomingMedia{am, MediaAudio, am.GetMimetype(), "", ""}, true
+	case m.GetDocumentMessage() != nil:
+		dm := m.GetDocumentMessage()
+		return IncomingMedia{dm, MediaDocument, dm.GetMimetype(), dm.GetFileName(), dm.GetCaption()}, true
+	case m.GetStickerMessage() != nil:
+		sm := m.GetStickerMessage()
+		return IncomingMedia{sm, MediaSticker, sm.GetMimetype(), "", ""}, true
+	default:
+		return IncomingMedia{}, false
+	}
+}
+
+// saveIncomingMedia downloads (decrypts) the attachment and writes it under
+// receivedMediaDir, returning the file path.
+func (p *WhatsMeowProvider) saveIncomingMedia(ctx context.Context, msgID string, media IncomingMedia) (string, error) {
+	data, err := p.client.Download(ctx, media.msg)
+	if err != nil {
+		return "", fmt.Errorf("download media: %w", err)
+	}
+
+	if err := os.MkdirAll(receivedMediaDir, 0o755); err != nil {
+		return "", fmt.Errorf("create media dir: %w", err)
+	}
+
+	path := filepath.Join(receivedMediaDir, incomingFileName(msgID, media))
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return "", fmt.Errorf("write media file: %w", err)
+	}
+	return path, nil
+}
+
+func incomingFileName(msgID string, media IncomingMedia) string {
+	id := safeBaseName(msgID)
+	if id == "" {
+		id = "message"
+	}
+	if name := safeBaseName(media.filename); name != "" {
+		return id + "_" + name
+	}
+	return id + extensionForMime(media.mimetype)
+}
+
+// safeBaseName reduces an untrusted name to its final path component and drops it
+// entirely if it still resolves to a traversal token or contains a separator.
+func safeBaseName(name string) string {
+	if name == "" {
+		return ""
+	}
+	base := filepath.Base(filepath.Clean(name))
+	if base == "." || base == ".." || strings.ContainsAny(base, `/\`) {
+		return ""
+	}
+	return base
+}
+
+// extensionForMime maps a mimetype ("image/jpeg", "audio/ogg; codecs=opus") to a
+// file extension, falling back to ".bin" when it is unknown.
+func extensionForMime(mimetype string) string {
+	if i := strings.IndexByte(mimetype, ';'); i >= 0 {
+		mimetype = strings.TrimSpace(mimetype[:i])
+	}
+	if exts, err := mime.ExtensionsByType(mimetype); err == nil && len(exts) > 0 {
+		return exts[0]
+	}
+	return ".bin"
 }
 
 func (p *WhatsMeowProvider) setQR(code string) {
