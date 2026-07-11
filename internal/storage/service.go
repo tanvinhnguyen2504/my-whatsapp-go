@@ -33,11 +33,11 @@ func NewStorageService(bucketName, bucketProjectID, bucketCdnBaseUrl string) (St
 	if err != nil {
 		return nil, err
 	}
-	if bucket, err := client.Bucket(bucketName).Attrs(ctx); err != nil || bucket == nil {
-		return nil, err
+	if _, err := client.Bucket(bucketName).Attrs(ctx); err != nil {
+		return nil, fmt.Errorf("access bucket %q: %w", bucketName, err)
 	}
-	if sa, err := client.ServiceAccount(ctx, bucketProjectID); err != nil || sa == "" {
-		return nil, err
+	if _, err := client.ServiceAccount(ctx, bucketProjectID); err != nil {
+		return nil, fmt.Errorf("verify service account: %w", err)
 	}
 
 	return storageService{
@@ -100,6 +100,6 @@ func determineMediaType(file multipart.File) whatsapp.MediaKind {
 	case strings.HasPrefix(contentType, "audio/"):
 		return whatsapp.MediaAudio
 	default:
-		return whatsapp.MediaAudio
+		return whatsapp.MediaDocument
 	}
 }

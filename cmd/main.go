@@ -25,8 +25,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// storageService, _ := storage.NewStorageService(cfg.GoogleCloudBucketName, cfg.GoogleCloudProjectID, "")
-	provider, err := whatsapp.New(cfg)
+	// new service, we conve
+	whatsappService, err := whatsapp.NewWhatsAppService(cfg)
 	if err != nil {
 		slog.Error("build provider", "error", err)
 		os.Exit(1)
@@ -35,15 +35,16 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	slog.Info("starting whatsapp provider", "provider", provider.Name())
-	if err := provider.Connect(ctx); err != nil {
+	slog.Info("starting whatsapp provider", "provider", whatsappService.Name())
+	if err := whatsappService.Connect(ctx); err != nil {
 		slog.Error("connect provider", "error", err)
 		os.Exit(1)
 	}
-	defer provider.Disconnect()
+	defer whatsappService.Disconnect()
 
-	sched := scheduler.New(provider)
-	router := api.NewRouter(cfg, provider, sched)
+	sched := scheduler.New(whatsappService)
+
+	router := api.NewRouter(cfg, whatsappService, sched)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.HTTPPort,

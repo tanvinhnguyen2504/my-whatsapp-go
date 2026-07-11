@@ -10,15 +10,15 @@ import (
 	"time"
 )
 
-type BusinessProvider struct {
+type WhatsappAPIService struct {
 	phoneNumberID string
 	accessToken   string
 	apiVersion    string
 	http          *http.Client
 }
 
-func NewWhatsAppAPIProvider(phoneNumberID, accessToken, apiVersion string) *BusinessProvider {
-	return &BusinessProvider{
+func NewWhatsappAPIService(phoneNumberID, accessToken, apiVersion string) *WhatsappAPIService {
+	return &WhatsappAPIService{
 		phoneNumberID: phoneNumberID,
 		accessToken:   accessToken,
 		apiVersion:    apiVersion,
@@ -26,19 +26,19 @@ func NewWhatsAppAPIProvider(phoneNumberID, accessToken, apiVersion string) *Busi
 	}
 }
 
-func (p *BusinessProvider) Name() string { return "whatsapp-business" }
+func (p *WhatsappAPIService) Name() string { return "whatsapp-api" }
 
-func (p *BusinessProvider) Connect(ctx context.Context) error { return nil }
+func (p *WhatsappAPIService) Connect(ctx context.Context) error { return nil }
 
-func (p *BusinessProvider) Disconnect() {}
+func (p *WhatsappAPIService) Disconnect() {}
 
-func (p *BusinessProvider) IsReady() bool {
+func (p *WhatsappAPIService) IsReady() bool {
 	return p.phoneNumberID != "" && p.accessToken != ""
 }
 
-func (p *BusinessProvider) QRCode() string { return "" }
+func (p *WhatsappAPIService) QRCode() string { return "" }
 
-func (p *BusinessProvider) SendText(ctx context.Context, to, body string) (SendResult, error) {
+func (p *WhatsappAPIService) SendText(ctx context.Context, to, body string) (SendResult, error) {
 	payload := map[string]any{
 		"messaging_product": "whatsapp",
 		"recipient_type":    "individual",
@@ -67,7 +67,7 @@ func (p *BusinessProvider) SendText(ctx context.Context, to, body string) (SendR
 }
 
 // post calls POST /{apiVersion}/{phoneNumberID}/{path} on the Graph API.
-func (p *BusinessProvider) post(ctx context.Context, path string, body any) ([]byte, error) {
+func (p *WhatsappAPIService) post(ctx context.Context, path string, body any) ([]byte, error) {
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("encode request: %w", err)
@@ -94,6 +94,6 @@ func (p *BusinessProvider) post(ctx context.Context, path string, body any) ([]b
 	return data, nil
 }
 
-func (p *BusinessProvider) SendMedia(ctx context.Context, to string, m MediaMessage) (SendResult, error) {
-	return SendResult{MessageID: "", Provider: ""}, nil
+func (p *WhatsappAPIService) SendMedia(ctx context.Context, to string, m MediaMessage) (SendResult, error) {
+	return SendResult{}, fmt.Errorf("SendMedia not implemented for the Business Cloud API provider")
 }

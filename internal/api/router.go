@@ -14,22 +14,10 @@ func NewRouter(cfg config.Config, provider whatsapp.Provider, sched *scheduler.S
 	h := NewHandler(provider, sched)
 	wh := newWebhookHandler(cfg.WebhookVerifyToken)
 
-	r.GET("/health", h.health)
-	r.GET("/qr", h.qr)
-
-	messages := r.Group("/messages")
-	{
-		messages.POST("/text", h.sendText)
-		messages.POST("/media", h.sendMedia)
-		messages.POST("/schedule", h.scheduleText)
-	}
-
-	// For the API
-	webhook := r.Group("/webhook")
-	{
-		webhook.GET("", wh.verify)   // Meta verification handshake
-		webhook.POST("", wh.receive) // inbound events
-	}
+	// Each domain declares its own routes in a dedicated routes_*.go file.
+	registerSystemRoutes(r, h)
+	registerMessageRoutes(r, h)
+	registerWebhookRoutes(r, wh)
 
 	return r
 }

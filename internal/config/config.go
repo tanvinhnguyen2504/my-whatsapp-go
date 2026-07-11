@@ -9,37 +9,60 @@ import (
 
 // Provider selects which WhatsApp workflow the server drives.
 const (
-	// ProviderAPI is the unofficial personal-account workflow backed by WhatsMeow
-	// (QR login, local session store). Value: WHATSAPP_PROVIDER=api
+	// ProviderAPI is the official Meta WhatsApp Business Cloud API workflow
+	// (access token + phone number id). Value: WHATSAPP_PROVIDER=api
 	ProviderAPI = "api"
-	// ProviderBusiness is the official Meta WhatsApp Business Cloud API workflow
-	// (access token + phone number id). Value: WHATSAPP_PROVIDER=business
+	// ProviderBusiness is the unofficial personal-account workflow backed by
+	// WhatsMeow (QR login, PostgreSQL session store). Value: WHATSAPP_PROVIDER=business
 	ProviderBusiness = "business"
 )
 
-// Config holds all runtime configuration, loaded from environment variables.
+// Database holds the PostgreSQL session-store settings used by the WhatsMeow
+// (business) workflow.
+type Database struct {
+	Host       string
+	Port       string
+	User       string
+	Pass       string
+	Name       string
+	SSLEnabled bool
+}
+
+func (d Database) DSN() string {
+	sslMode := "disable"
+	if d.SSLEnabled {
+		sslMode = "require"
+	}
+	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s",
+		d.User, d.Pass, d.Host, d.Port, d.Name, sslMode)
+	return dsn
+}
+
+func (d Database) WhatsmeosDSN() string {
+	schema := "whatsmeow"
+
+	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s&search_path=%s",
+		d.User, d.Pass, d.Host, d.Port, d.Name, d.SSLEnabled, schema)
+	return dsn
+
+}
+
 type Config struct {
 	Mode     string // development | production
 	HTTPPort string
 	Provider string // api | business
 
-	// WhatsMeow (personal account) workflow session store — PostgreSQL.
-	DBHost   string
-	DBPort   string
-	DBUser   string
-	DBPass   string
-	DBName   string
-	DBSchema string // PostgreSQL schema holding the whatsmeow_* tables (search_path)
+	Database Database
 
 	// WhatsApp Business Cloud API workflow.
 	BusinessPhoneNumberID string
 	BusinessAccessToken   string
 	BusinessAPIVersion    string
 
-	// Webhook (used by the Business workflow's verification handshake).
+	// Webhook (used by the api workflow's verification handshake).
 	WebhookVerifyToken string
 
-	// Google Cloud
+	// Google Cloud Storage (media uploads).
 	GoogleCloudProjectID  string
 	GoogleCloudBucketName string
 }
@@ -48,15 +71,17 @@ func Load() (Config, error) {
 	_ = godotenv.Load()
 
 	cfg := Config{
-		Mode:                  env("MODE", "development"),
-		HTTPPort:              env("HTTP_PORT", "8082"),
-		Provider:              env("WHATSAPP_PROVIDER", ProviderAPI),
-		DBHost:                os.Getenv("DB_HOST"),
-		DBPort:                env("DB_PORT", "5432"),
-		DBUser:                os.Getenv("DB_USER"),
-		DBPass:                os.Getenv("DB_PASS"),
-		DBName:                os.Getenv("DB_NAME"),
-		DBSchema:              os.Getenv("DB_SCHEMA"),
+		Mode:     env("MODE", "development"),
+		HTTPPort: env("HTTP_PORT", "8082"),
+		Provider: env("WHATSAPP_PROVIDER", ProviderAPI),
+		Database: Database{
+			Host:       env("DB_HOST", "localhost"),
+			Port:       env("DB_PORT", "5432"),
+			User:       env("DB_USER", "postgres"),
+			Pass:       os.Getenv("DB_PASS"),
+			Name:       env("DB_NAME", "my_whatsapp"),
+			SSLEnabled: os.Getenv("DB_SSL") == "true",
+		},
 		BusinessPhoneNumberID: os.Getenv("WHATSAPP_BUSINESS_PHONE_NUMBER_ID"),
 		BusinessAccessToken:   os.Getenv("WHATSAPP_BUSINESS_ACCESS_TOKEN"),
 		BusinessAPIVersion:    env("WHATSAPP_BUSINESS_API_VERSION", "v21.0"),
@@ -74,12 +99,12 @@ func Load() (Config, error) {
 func (c Config) validate() error {
 	switch c.Provider {
 	case ProviderBusiness:
-		if c.DBHost == "" || c.DBUser == "" || c.DBName == "" {
-			return fmt.Errorf("api provider requires DB_HOST, DB_USER and DB_NAME (PostgreSQL session store)")
+		if c.Database.Host == "" || c.Database.User == "" || c.Database.Name == "" {
+			return fmt.Errorf("business provider requires DB_HOST, DB_USER and DB_NAME (PostgreSQL session store)")
 		}
 	case ProviderAPI:
 		if c.BusinessPhoneNumberID == "" || c.BusinessAccessToken == "" {
-			return fmt.Errorf("business provider requires WHATSAPP_BUSINESS_PHONE_NUMBER_ID and WHATSAPP_BUSINESS_ACCESS_TOKEN")
+			return fmt.Errorf("api provider requires WHATSAPP_BUSINESS_PHONE_NUMBER_ID and WHATSAPP_BUSINESS_ACCESS_TOKEN")
 		}
 	default:
 		return fmt.Errorf("unknown WHATSAPP_PROVIDER %q (want %q or %q)", c.Provider, ProviderAPI, ProviderBusiness)
@@ -87,17 +112,19 @@ func (c Config) validate() error {
 	return nil
 }
 
-func (c Config) PostgresDSN() string {
-	auth := c.DBUser
-	if c.DBPass != "" {
-		auth += ":" + c.DBPass
-	}
-	dsn := fmt.Sprintf("postgres://%s@%s:%s/%s?sslmode=disable", auth, c.DBHost, c.DBPort, c.DBName)
-	if c.DBSchema != "" {
-		dsn += "&search_path=" + c.DBSchema
-	}
-	return dsn
-}
+// func (c Config) WhatsmeowConnectionString() string {
+// 	schema := "whatsmeow"
+
+// 	return fmt.Sprintf("user=%s password=%s dbname=%s host=%s port=%d sslmode=%s search_path=%s",
+// 		c.Database.User,
+// 		c.Database.Pass,
+// 		c.Database.Name,
+// 		c.Database.Host,
+// 		c.Database.Port,
+// 		c.Database.SSLEnabled,
+// 		schema,
+// 	)
+// }
 
 func env(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {

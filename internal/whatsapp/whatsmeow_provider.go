@@ -24,6 +24,7 @@ import (
 
 type WhatsMeowProvider struct {
 	postgresDSN string
+	schema      string
 
 	client *whatsmeow.Client
 
@@ -31,11 +32,13 @@ type WhatsMeowProvider struct {
 	qrCode string
 }
 
+const RECEIVED_MEDIA_DIR = "received_media"
+
 func NewWhatsMeowProvider(postgresDSN string) *WhatsMeowProvider {
 	return &WhatsMeowProvider{postgresDSN: postgresDSN}
 }
 
-func (p *WhatsMeowProvider) Name() string { return "whatsapp-api" }
+func (p *WhatsMeowProvider) Name() string { return "whatsapp-business" }
 
 func (p *WhatsMeowProvider) Connect(ctx context.Context) error {
 	dbLog := waLog.Stdout("Database", "WARN", true)
@@ -44,12 +47,12 @@ func (p *WhatsMeowProvider) Connect(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("open postgres store: %w", err)
 	}
+
 	container := sqlstore.NewWithDB(db, "postgres", dbLog)
 	if err := container.Upgrade(ctx); err != nil {
 		return fmt.Errorf("upgrade store schema: %w", err)
 	}
 
-	// If we manage multi-devices, we need have other way to fetch the device (by ID/)
 	device, err := container.GetFirstDevice(ctx)
 	if err != nil {
 		return fmt.Errorf("load device: %w", err)
@@ -92,6 +95,12 @@ func (p *WhatsMeowProvider) pairAndConnect(ctx context.Context) error {
 		}
 	}()
 	return nil
+}
+
+// quoteIdentifier double-quotes a Postgres identifier so a schema name from
+// config can be interpolated into DDL safely.
+func quoteIdentifier(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
 func (p *WhatsMeowProvider) Disconnect() {
@@ -294,8 +303,6 @@ func (p *WhatsMeowProvider) eventHandler(rawEvt any) {
 	// }
 }
 
-const receivedMediaDir = "received_media"
-
 func (p *WhatsMeowProvider) handleMessage(e *events.Message) {
 	if text := e.Message.GetConversation(); text != "" {
 		slog.Info("incoming text",
@@ -350,19 +357,17 @@ func downloadableMedia(m *waE2E.Message) (IncomingMedia, bool) {
 	}
 }
 
-// saveIncomingMedia downloads (decrypts) the attachment and writes it under
-// receivedMediaDir, returning the file path.
 func (p *WhatsMeowProvider) saveIncomingMedia(ctx context.Context, msgID string, media IncomingMedia) (string, error) {
 	data, err := p.client.Download(ctx, media.msg)
 	if err != nil {
 		return "", fmt.Errorf("download media: %w", err)
 	}
 
-	if err := os.MkdirAll(receivedMediaDir, 0o755); err != nil {
+	if err := os.MkdirAll(RECEIVED_MEDIA_DIR, 0o755); err != nil {
 		return "", fmt.Errorf("create media dir: %w", err)
 	}
 
-	path := filepath.Join(receivedMediaDir, incomingFileName(msgID, media))
+	path := filepath.Join(RECEIVED_MEDIA_DIR, incomingFileName(msgID, media))
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return "", fmt.Errorf("write media file: %w", err)
 	}

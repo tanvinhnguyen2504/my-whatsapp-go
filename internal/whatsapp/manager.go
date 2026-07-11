@@ -6,14 +6,14 @@ import (
 	"github.com/vinhnguyentan99/my-whatsapp/internal/config"
 )
 
-func New(cfg config.Config) (Provider, error) {
+func NewWhatsAppService(cfg config.Config) (Provider, error) {
 	switch cfg.Provider {
-	// Phase 2
+	// business: unofficial personal account via WhatsMeow (PostgreSQL session store).
 	case config.ProviderBusiness:
-		return NewWhatsMeowProvider(cfg.PostgresDSN()), nil
-	// Phase 1: We need focus on this...
+		return NewWhatsMeowProvider(cfg.Database.WhatsmeosDSN()), nil
+	// api: official Meta WhatsApp Business Cloud API.
 	case config.ProviderAPI:
-		return NewWhatsAppAPIProvider(cfg.BusinessPhoneNumberID, cfg.BusinessAccessToken, cfg.BusinessAPIVersion), nil
+		return NewWhatsappAPIService(cfg.BusinessPhoneNumberID, cfg.BusinessAccessToken, cfg.BusinessAPIVersion), nil
 	default:
 		return nil, fmt.Errorf("unknown provider %q", cfg.Provider)
 	}

@@ -8,11 +8,11 @@ The server drives **one of two selectable WhatsApp workflows**, chosen at startu
 `WHATSAPP_PROVIDER`, behind a single `whatsapp.Provider` interface so the REST layer is
 identical for both:
 
-- `api` — **WhatsMeow** (unofficial, personal account). Logs in via QR code, keeps its
+- `business` — **WhatsMeow** (unofficial, personal account). Logs in via QR code, keeps its
   multi-device session in a **PostgreSQL** store (`pgx` driver, pure Go / no CGO), so the
   `whatsmeow_*` tables can be inspected directly in a local Postgres for debugging.
   Inbound messages arrive through an in-process event handler.
-- `business` — **Meta WhatsApp Business Cloud API** (official). Stateless HTTPS calls to
+- `api` — **Meta WhatsApp Business Cloud API** (official). Stateless HTTPS calls to
   `graph.facebook.com`; inbound messages arrive via the `/webhook` HTTP callback (Meta's
   `GET` verification handshake echoes `hub.challenge` using `WHATSAPP_API_WEBHOOK_VERIFY_TOKEN`).
 
@@ -46,11 +46,11 @@ full template. Loading fails fast if the selected provider is misconfigured.
 
 - `MODE` — development | production
 - `HTTP_PORT` — server port (default `8082`)
-- `WHATSAPP_PROVIDER` — `api` (WhatsMeow) or `business` (Meta Cloud API)
+- `WHATSAPP_PROVIDER` — `api` (Meta Cloud API) or `business` (WhatsMeow)
 - `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASS` / `DB_NAME` — PostgreSQL session store,
-  **required by the `api` workflow** (`DB_HOST`, `DB_USER`, `DB_NAME` must be set)
+  **required by the `business` workflow** (`DB_HOST`, `DB_USER`, `DB_NAME` must be set)
 - `WHATSAPP_BUSINESS_PHONE_NUMBER_ID` / `WHATSAPP_BUSINESS_ACCESS_TOKEN` /
-  `WHATSAPP_BUSINESS_API_VERSION` — required by the `business` workflow
+  `WHATSAPP_BUSINESS_API_VERSION` — required by the `api` workflow
 - `WHATSAPP_API_WEBHOOK_VERIFY_TOKEN` — echoes Meta's webhook `GET` verification handshake
 
 ## Project Goal
