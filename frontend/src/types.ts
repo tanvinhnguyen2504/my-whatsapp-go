@@ -16,3 +16,20 @@ export interface SendResult {
 }
 
 export type ConnStatus = "connecting" | "open" | "closed";
+
+// ClientCommand is a frame the browser sends over the socket.
+export interface ClientCommand {
+  type: "send";
+  req_id: string;
+  to: string;
+  body: string;
+}
+
+// ServerEvent is a frame the server sends: "message" carries an inbound
+// broadcast; "ack" carries the result of a send command, keyed by req_id.
+export type ServerEvent =
+  | { type: "message"; data: Message }
+  | { type: "ack"; req_id: string; ok: boolean; message_id?: string; error?: string };
+
+// SendState is the client-side lifecycle of an outgoing message bubble.
+export type SendState = "sending" | "sent" | "failed";

@@ -47,7 +47,17 @@ func main() {
 		slog.Error("ensure ws schema", "error", err)
 		os.Exit(1)
 	}
-	wsSvc := websocket.NewService(websocket.NewHub(), wsRepo)
+
+	// The websocket service sends outgoing messages through the provider, while the
+	// provider publishes inbound ones back into the service — a cycle. Break it by
+	// having sendFunc close over a provider variable assigned just below; it is only
+	// invoked once a client sends, long after assignment.
+	var whatsappService whatsapp.Provider
+	sendFunc := func(ctx context.Context, to, body string) (string, error) {
+		r, err := whatsappService.SendText(ctx, to, body)
+		return r.MessageID, err
+	}
+	wsSvc := websocket.NewService(websocket.NewHub(), wsRepo, sendFunc)
 
 	// Bridge received WhatsApp messages into the WebSocket layer.
 	onInbound := func(ctx context.Context, m whatsapp.InboundMessage) {
@@ -64,7 +74,7 @@ func main() {
 		}
 	}
 
-	whatsappService, err := whatsapp.NewWhatsAppService(cfg, onInbound)
+	whatsappService, err = whatsapp.NewWhatsAppService(cfg, onInbound)
 	if err != nil {
 		slog.Error("build provider", "error", err)
 		os.Exit(1)

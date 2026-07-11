@@ -25,9 +25,10 @@ func (h *Hub) Unregister(c *Client) {
 }
 
 func (h *Hub) Broadcast(m Message) {
+	ev := ServerEvent{Type: "message", Data: &m}
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for _, c := range h.clients {
-		c.enqueue(m)
+		c.enqueue(ev)
 	}
 }

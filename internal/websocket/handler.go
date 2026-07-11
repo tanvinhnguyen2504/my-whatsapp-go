@@ -3,9 +3,14 @@ package websocket
 import (
 	"net/http"
 
-	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 )
+
+// upgrader performs the HTTP -> WebSocket handshake. The default CheckOrigin
+// enforces same-origin; to allow a browser served from another origin, set a
+// custom CheckOrigin, e.g. func(r *http.Request) bool { return r.Header.Get("Origin") == "https://app.example.com" }.
+var upgrader = websocket.Upgrader{}
 
 type Handler struct {
 	svc *Service
@@ -18,9 +23,9 @@ func NewHandler(svc *Service) *Handler {
 // Stream upgrades the request, registers the client on the hub and blocks
 // delivering broadcasts until the client disconnects.
 func (h *Handler) Stream(c *gin.Context) {
-	// Origin is verified (same-origin) by default. To allow a browser frontend
-	// served from another origin, list it here, e.g. OriginPatterns: []string{"app.example.com"}.
-	conn, err := coderws.Accept(c.Writer, c.Request, &coderws.AcceptOptions{})
+	// Upgrade writes the 101 response (or an error response) itself; on failure
+	// there is nothing left to do.
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		return
 	}
@@ -29,7 +34,7 @@ func (h *Handler) Stream(c *gin.Context) {
 	h.svc.Register(client)
 	defer h.svc.Unregister(client)
 
-	_ = client.Serve(c.Request.Context())
+	_ = client.Serve(c.Request.Context(), h.svc.HandleCommand)
 }
 
 func (h *Handler) History(c *gin.Context) {
