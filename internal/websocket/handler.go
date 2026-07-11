@@ -7,8 +7,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Handler upgrades HTTP connections to WebSocket and streams inbound WhatsApp
-// messages to the client through the Service hub.
 type Handler struct {
 	svc *Service
 }
@@ -34,7 +32,6 @@ func (h *Handler) Stream(c *gin.Context) {
 	_ = client.Serve(c.Request.Context())
 }
 
-// History returns the most recent stored messages for a chat JID.
 func (h *Handler) History(c *gin.Context) {
 	msgs, err := h.svc.History(c.Request.Context(), c.Param("chat"), 50)
 	if err != nil {
@@ -42,4 +39,17 @@ func (h *Handler) History(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, msgs)
+}
+
+func (h *Handler) DebugPublish(c *gin.Context) {
+	var m Message
+	if err := c.ShouldBindJSON(&m); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.svc.Publish(c.Request.Context(), m); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, m)
 }

@@ -11,3 +11,5 @@ server
 
 # Secrets
 .env
+
+*/node_modules

@@ -3,9 +3,11 @@ package websocket
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	coderws "github.com/coder/websocket"
 	"github.com/google/uuid"
+	"github.com/vinhnguyentan99/my-whatsapp/pkg"
 )
 
 // Client is a single connected subscriber. Broadcasts are queued on send and
@@ -38,6 +40,8 @@ func (c *Client) Serve(ctx context.Context) error {
 			if err != nil {
 				continue
 			}
+			fmt.Println("[DEBUG]-data message")
+			pkg.DebugJson(data)
 			if err := c.conn.Write(ctx, coderws.MessageText, data); err != nil {
 				return err
 			}

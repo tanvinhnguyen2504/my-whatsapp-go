@@ -20,11 +20,13 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/vinhnguyentan99/my-whatsapp/pkg"
 )
 
 type WhatsMeowProvider struct {
 	postgresDSN string
 	schema      string
+	onInbound   InboundFunc
 
 	client *whatsmeow.Client
 
@@ -34,8 +36,8 @@ type WhatsMeowProvider struct {
 
 const RECEIVED_MEDIA_DIR = "received_media"
 
-func NewWhatsMeowProvider(postgresDSN string) *WhatsMeowProvider {
-	return &WhatsMeowProvider{postgresDSN: postgresDSN}
+func NewWhatsMeowProvider(postgresDSN string, onInbound InboundFunc) *WhatsMeowProvider {
+	return &WhatsMeowProvider{postgresDSN: postgresDSN, onInbound: onInbound}
 }
 
 func (p *WhatsMeowProvider) Name() string { return "whatsapp-business" }
@@ -133,32 +135,6 @@ func (p *WhatsMeowProvider) SendText(ctx context.Context, to, body string) (Send
 	return SendResult{MessageID: resp.ID, Provider: p.Name()}, nil
 }
 
-func (p *WhatsMeowProvider) SendMedia(ctx context.Context, to string, m MediaMessage) (SendResult, error) {
-	if !p.IsReady() {
-		return SendResult{}, fmt.Errorf("provider not ready: log in by scanning the QR code first")
-	}
-
-	mediaType, ok := getWhatMeowMediaType(m.Kind)
-	if !ok {
-		return SendResult{}, fmt.Errorf("unsupported media kind %q", m.Kind)
-	}
-
-	jid := p.resolveJID(ctx, to)
-
-	up, err := p.client.Upload(ctx, m.Data, mediaType)
-	if err != nil {
-		return SendResult{}, fmt.Errorf("upload media: %w", err)
-	}
-
-	msg := buildMediaMessage(m, up)
-
-	resp, err := p.client.SendMessage(ctx, jid, msg)
-	if err != nil {
-		return SendResult{}, fmt.Errorf("send message: %w", err)
-	}
-	return SendResult{MessageID: resp.ID, Provider: p.Name()}, nil
-}
-
 // resolveJID resolves the recipient's WhatsApp JID for `to` (E.164 digits, no '+').
 //
 // It resolves + persists the recipient's LID via GetUserInfo (which calls
@@ -179,160 +155,55 @@ func (p *WhatsMeowProvider) resolveJID(ctx context.Context, to string) types.JID
 	return pnJID
 }
 
-func getWhatMeowMediaType(k MediaKind) (whatsmeow.MediaType, bool) {
-	switch k {
-	case MediaImage:
-		return whatsmeow.MediaImage, true
-	case MediaVideo:
-		return whatsmeow.MediaVideo, true
-	case MediaAudio:
-		return whatsmeow.MediaAudio, true
-	case MediaDocument:
-		return whatsmeow.MediaDocument, true
-	case MediaSticker:
-		return whatsmeow.MediaImage, true // stickers upload with the image media type
-	default:
-		return "", false
-	}
-}
-
-func buildMediaMessage(m MediaMessage, up whatsmeow.UploadResponse) *waE2E.Message {
-	switch m.Kind {
-	case MediaImage:
-		return &waE2E.Message{ImageMessage: &waE2E.ImageMessage{
-			URL:           proto.String(up.URL),
-			DirectPath:    proto.String(up.DirectPath),
-			MediaKey:      up.MediaKey,
-			Mimetype:      proto.String(m.Mimetype),
-			FileEncSHA256: up.FileEncSHA256,
-			FileSHA256:    up.FileSHA256,
-			FileLength:    proto.Uint64(up.FileLength),
-			Caption:       proto.String(m.Caption),
-		}}
-	case MediaVideo:
-		return &waE2E.Message{VideoMessage: &waE2E.VideoMessage{
-			URL:           proto.String(up.URL),
-			DirectPath:    proto.String(up.DirectPath),
-			MediaKey:      up.MediaKey,
-			Mimetype:      proto.String(m.Mimetype),
-			FileEncSHA256: up.FileEncSHA256,
-			FileSHA256:    up.FileSHA256,
-			FileLength:    proto.Uint64(up.FileLength),
-			Caption:       proto.String(m.Caption),
-		}}
-	case MediaAudio:
-		return &waE2E.Message{AudioMessage: &waE2E.AudioMessage{
-			URL:           proto.String(up.URL),
-			DirectPath:    proto.String(up.DirectPath),
-			MediaKey:      up.MediaKey,
-			Mimetype:      proto.String(m.Mimetype),
-			FileEncSHA256: up.FileEncSHA256,
-			FileSHA256:    up.FileSHA256,
-			FileLength:    proto.Uint64(up.FileLength),
-		}}
-	case MediaSticker:
-		return &waE2E.Message{StickerMessage: &waE2E.StickerMessage{
-			URL:           proto.String(up.URL),
-			DirectPath:    proto.String(up.DirectPath),
-			MediaKey:      up.MediaKey,
-			Mimetype:      proto.String(m.Mimetype),
-			FileEncSHA256: up.FileEncSHA256,
-			FileSHA256:    up.FileSHA256,
-			FileLength:    proto.Uint64(up.FileLength),
-		}}
-	default: // MediaDocument
-		return &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{
-			URL:           proto.String(up.URL),
-			DirectPath:    proto.String(up.DirectPath),
-			MediaKey:      up.MediaKey,
-			Mimetype:      proto.String(m.Mimetype),
-			FileEncSHA256: up.FileEncSHA256,
-			FileSHA256:    up.FileSHA256,
-			FileLength:    proto.Uint64(up.FileLength),
-			FileName:      proto.String(m.FileName),
-			Caption:       proto.String(m.Caption),
-		}}
-	}
-}
-
 func (p *WhatsMeowProvider) eventHandler(rawEvt any) {
-	fmt.Println("Case inbound messages...")
-	// switch evt := rawEvt.(type) {
-	// case *events.Message:
-	// 	{
-	// 		var messageType, messageContent string
-	// 		var mediaMessage *MediaMessage
-
-	// 		messageType = evt.Info.Type
-	// 		switch messageType {
-	// 		case MessageTypeText:
-	// 		case MessageTypeMedia:
-	// 			switch evt.Info.MediaType {
-	// 			case MessageMediaTypeUrl:
-	// 				messageContent = evt.Message.GetExtendedTextMessage().GetText()
-	// 			case MessageMediaTypeImage:
-	// 				{
-
-	// 				}
-	// 			case MessageMediaTypeAudio, MessageMediaTypePtt:
-	// 				{
-
-	// 				}
-	// 			case MessageMediaTypeVideo, MessageMediaTypeGif:
-	// 				{
-
-	// 				}
-	// 			case MessageMediaTypeDocument:
-	// 				{
-
-	// 				}
-	// 			case MessageMediaTypeSticker, MessageMediaType1pSticker:
-	// 				{
-
-	// 				}
-	// 				// do nothing for other media types
-	// 			}
-	// 		case MessageTypePoll, MessageTypeReaction:
-	// 			// do nothing...
-	// 		}
-	// 	}
-	// case *events.Connected:
-	// 	slog.Info("whatsapp connected")
-	// case *events.LoggedOut:
-	// 	slog.Warn("whatsapp logged out; QR re-pairing required")
-	// }
+	fmt.Println("[DEBUG]-eventHandler...")
+	// pkg.DebugJson(rawEvt)
+	switch evt := rawEvt.(type) {
+	case *events.Message:
+		p.handleInbound(evt)
+	case *events.Connected:
+		slog.Info("whatsapp connected")
+	case *events.LoggedOut:
+		slog.Warn("whatsapp logged out; QR re-pairing required")
+		// case *events.PairSuccess:
+		// 	slog.Warn()
+	}
 }
 
-func (p *WhatsMeowProvider) handleMessage(e *events.Message) {
-	if text := e.Message.GetConversation(); text != "" {
-		slog.Info("incoming text",
-			"from", e.Info.Sender.String(),
-			"chat", e.Info.Chat.String(),
-			"text", text,
-		)
+func (p *WhatsMeowProvider) handleInbound(e *events.Message) {
+	if p.onInbound == nil {
 		return
 	}
 
-	fmt.Println(e.Message, "e.Message...")
-
-	media, ok := downloadableMedia(e.Message)
-	if !ok {
-		return
+	msg := InboundMessage{
+		ID:        e.Info.ID,
+		ChatJID:   e.Info.Chat.String(),
+		SenderJID: e.Info.Sender.String(),
+		Timestamp: e.Info.Timestamp,
 	}
 
-	path, err := p.saveIncomingMedia(context.Background(), e.Info.ID, media)
-	if err != nil {
-		slog.Error("save incoming media", "from", e.Info.Sender.String(), "error", err)
-		return
+	fmt.Println("[DEBUG]-inbound message")
+	pkg.DebugJson(msg)
+
+	switch {
+	case e.Message.GetConversation() != "":
+		msg.Kind, msg.Body = "text", e.Message.GetConversation()
+	case e.Message.GetExtendedTextMessage().GetText() != "":
+		msg.Kind, msg.Body = "text", e.Message.GetExtendedTextMessage().GetText()
+	default:
+		media, ok := downloadableMedia(e.Message)
+		if !ok {
+			return
+		}
+		msg.Kind, msg.Body = string(media.kind), media.caption
+		if path, err := p.saveIncomingMedia(context.Background(), e.Info.ID, media); err == nil {
+			msg.MediaPath = path
+		} else {
+			slog.Error("save incoming media", "from", msg.SenderJID, "error", err)
+		}
 	}
-	slog.Info("saved incoming media",
-		"from", e.Info.Sender.String(),
-		"chat", e.Info.Chat.String(),
-		"kind", media.kind,
-		"mimetype", media.mimetype,
-		"caption", media.caption,
-		"path", path,
-	)
+
+	p.onInbound(context.Background(), msg)
 }
 
 func downloadableMedia(m *waE2E.Message) (IncomingMedia, bool) {

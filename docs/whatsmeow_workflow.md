@@ -183,7 +183,7 @@ case msg.GetAudioMessage() != nil:           data, _ = client.Download(ctx, msg.
 
 ### Receiving media in this repo
 
-Implemented in `internal/whatsapp/whatsmeow_provider.go` (`handleMessage` → `downloadableMedia`
+Implemented in `internal/whatsapp/whatsmeow_provider.go` (`downloadableMedia`
 → `saveIncomingMedia`):
 
 1. `downloadableMedia` returns the first non-nil media part plus its kind, mimetype, filename

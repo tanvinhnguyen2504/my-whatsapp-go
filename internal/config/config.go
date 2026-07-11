@@ -41,10 +41,13 @@ func (d Database) DSN() string {
 func (d Database) WhatsmeosDSN() string {
 	schema := "whatsmeow"
 
+	sslMode := "disable"
+	if d.SSLEnabled {
+		sslMode = "require"
+	}
 	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s&search_path=%s",
-		d.User, d.Pass, d.Host, d.Port, d.Name, d.SSLEnabled, schema)
+		d.User, d.Pass, d.Host, d.Port, d.Name, sslMode, schema)
 	return dsn
-
 }
 
 type Config struct {

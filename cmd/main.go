@@ -30,26 +30,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	// new service, we conve
-	whatsappService, err := whatsapp.NewWhatsAppService(cfg)
-	if err != nil {
-		slog.Error("build provider", "error", err)
-		os.Exit(1)
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	slog.Info("starting whatsapp provider", "provider", whatsappService.Name())
-	if err := whatsappService.Connect(ctx); err != nil {
-		slog.Error("connect provider", "error", err)
-		os.Exit(1)
-	}
-	defer whatsappService.Disconnect()
-
-	sched := scheduler.New(whatsappService)
-
 	// Real-time layer: in-memory client hub + Postgres history, behind websocket.Service.
+	// Built before the provider so inbound messages can be published to it.
 	db, err := sqlx.Connect("pgx", cfg.Database.DSN())
 	if err != nil {
 		slog.Error("connect postgres", "error", err)
@@ -63,6 +48,36 @@ func main() {
 		os.Exit(1)
 	}
 	wsSvc := websocket.NewService(websocket.NewHub(), wsRepo)
+
+	// Bridge received WhatsApp messages into the WebSocket layer.
+	onInbound := func(ctx context.Context, m whatsapp.InboundMessage) {
+		if err := wsSvc.Publish(ctx, websocket.Message{
+			ID:        m.ID,
+			ChatJID:   m.ChatJID,
+			SenderJID: m.SenderJID,
+			Kind:      m.Kind,
+			Body:      m.Body,
+			MediaPath: m.MediaPath,
+			Timestamp: m.Timestamp,
+		}); err != nil {
+			slog.Error("publish inbound message", "error", err)
+		}
+	}
+
+	whatsappService, err := whatsapp.NewWhatsAppService(cfg, onInbound)
+	if err != nil {
+		slog.Error("build provider", "error", err)
+		os.Exit(1)
+	}
+
+	slog.Info("starting whatsapp provider", "provider", whatsappService.Name())
+	if err := whatsappService.Connect(ctx); err != nil {
+		slog.Error("connect provider", "error", err)
+		os.Exit(1)
+	}
+	defer whatsappService.Disconnect()
+
+	sched := scheduler.New(whatsappService)
 
 	router := api.NewRouter(cfg, whatsappService, sched, wsSvc)
 
