@@ -10,10 +10,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+
 	"github.com/vinhnguyentan99/my-whatsapp/internal/api"
 	"github.com/vinhnguyentan99/my-whatsapp/internal/config"
 	"github.com/vinhnguyentan99/my-whatsapp/internal/scheduler"
+	"github.com/vinhnguyentan99/my-whatsapp/internal/websocket"
 	"github.com/vinhnguyentan99/my-whatsapp/internal/whatsapp"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func main() {
@@ -44,7 +49,22 @@ func main() {
 
 	sched := scheduler.New(whatsappService)
 
-	router := api.NewRouter(cfg, whatsappService, sched)
+	// Real-time layer: in-memory client hub + Postgres history, behind websocket.Service.
+	db, err := sqlx.Connect("pgx", cfg.Database.DSN())
+	if err != nil {
+		slog.Error("connect postgres", "error", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	wsRepo := websocket.NewMessageRepo(db)
+	if err := wsRepo.EnsureSchema(ctx); err != nil {
+		slog.Error("ensure ws schema", "error", err)
+		os.Exit(1)
+	}
+	wsSvc := websocket.NewService(websocket.NewHub(), wsRepo)
+
+	router := api.NewRouter(cfg, whatsappService, sched, wsSvc)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.HTTPPort,
