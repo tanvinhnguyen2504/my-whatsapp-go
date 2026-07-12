@@ -20,7 +20,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/vinhnguyentan99/my-whatsapp/pkg"
 )
 
 type WhatsMeowProvider struct {
@@ -182,9 +181,6 @@ func (p *WhatsMeowProvider) handleInbound(e *events.Message) {
 		Timestamp: e.Info.Timestamp,
 	}
 
-	fmt.Println("[DEBUG]-inbound message")
-	pkg.DebugJson(msg)
-
 	switch {
 	case e.Message.GetConversation() != "":
 		msg.Kind, msg.Body = "text", e.Message.GetConversation()
@@ -196,6 +192,7 @@ func (p *WhatsMeowProvider) handleInbound(e *events.Message) {
 			return
 		}
 		msg.Kind, msg.Body = string(media.kind), media.caption
+		// TODO: this is only save to local to show...
 		if path, err := p.saveIncomingMedia(context.Background(), e.Info.ID, media); err == nil {
 			msg.MediaPath = path
 		} else {

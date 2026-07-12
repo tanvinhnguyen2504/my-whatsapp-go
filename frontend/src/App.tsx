@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getHistory, sendText } from "./api";
+import { getHistory } from "./api";
 import { useWebSocket } from "./useWebSocket";
-import type { Message } from "./types";
+import type { Message, SendState } from "./types";
+
+// ChatMessage is a Message plus a client-only delivery state for outgoing bubbles.
+type ChatMessage = Message & { state?: SendState };
 
 function toJID(to: string): string {
   const digits = to.replace(/\D/g, "");
@@ -10,9 +13,8 @@ function toJID(to: string): string {
 
 export default function App() {
   const [to, setTo] = useState("");
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
-  const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
 
   const chatJID = useMemo(() => toJID(to), [to]);
@@ -27,7 +29,7 @@ export default function App() {
     [chatJID],
   );
 
-  const status = useWebSocket(onMessage);
+  const { status, send } = useWebSocket(onMessage);
 
   // Load history whenever the recipient changes.
   useEffect(() => {
@@ -56,30 +58,39 @@ export default function App() {
     listRef.current?.scrollTo(0, listRef.current.scrollHeight);
   }, [messages]);
 
-  const send = async () => {
+  const handleSend = async () => {
     const body = draft.trim();
-    if (!body || !to.trim()) return;
-    setSending(true);
+    if (!body || !to.trim()) {
+      return;
+    }
+
+    // Optimistic local echo, marked "sending" until the send settles.
+    const tempId = crypto.randomUUID();
+    const optimistic: ChatMessage = {
+      id: tempId,
+      chat_jid: chatJID,
+      sender_jid: "me",
+      kind: "text",
+      body,
+      timestamp: new Date().toISOString(),
+      state: "sending",
+    };
+    setMessages((prev) => [...prev, optimistic]);
+    setDraft("");
     setError("");
+
     try {
-      const res = await sendText(to.trim(), body);
-      // Echo the outgoing message locally (it isn't broadcast back to us).
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: res.message_id || crypto.randomUUID(),
-          chat_jid: chatJID,
-          sender_jid: "me",
-          kind: "text",
-          body,
-          timestamp: new Date().toISOString(),
-        },
-      ]);
-      setDraft("");
+      const res = await send(to.trim(), body);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === tempId ? { ...m, id: res.message_id || tempId, state: "sent" } : m,
+        ),
+      );
     } catch (e) {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === tempId ? { ...m, state: "failed" } : m)),
+      );
       setError(String((e as Error).message ?? e));
-    } finally {
-      setSending(false);
     }
   };
 
@@ -107,7 +118,14 @@ export default function App() {
           <div key={m.id} className={`bubble ${m.sender_jid === "me" ? "out" : "in"}`}>
             {m.kind !== "text" && <span className="kind">[{m.kind}]</span>}
             <span className="body">{m.body || m.media_path}</span>
-            <time>{new Date(m.timestamp).toLocaleTimeString()}</time>
+            <span className="meta">
+              <time>{new Date(m.timestamp).toLocaleTimeString()}</time>
+              {m.sender_jid === "me" && m.state && (
+                <span className={`tick ${m.state}`}>
+                  {m.state === "sending" ? "…" : m.state === "sent" ? "✓" : "!"}
+                </span>
+              )}
+            </span>
           </div>
         ))}
       </div>
@@ -119,11 +137,11 @@ export default function App() {
           placeholder="Type a message"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
+          onKeyDown={(e) => e.key === "Enter" && handleSend()}
           disabled={!to.trim()}
         />
-        <button onClick={send} disabled={sending || !draft.trim() || !to.trim()}>
-          {sending ? "…" : "Send"}
+        <button onClick={handleSend} disabled={!draft.trim() || !to.trim()}>
+          Send
         </button>
       </div>
     </div>

@@ -109,10 +109,30 @@ body {
   color: #888;
 }
 
+.bubble .meta {
+  align-self: flex-end;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .bubble time {
   font-size: 10px;
   color: #999;
-  align-self: flex-end;
+}
+
+.tick {
+  font-size: 11px;
+  color: #4a9c6d;
+}
+
+.tick.sending {
+  color: #999;
+}
+
+.tick.failed {
+  color: #d33;
+  font-weight: 700;
 }
 
 .error {
