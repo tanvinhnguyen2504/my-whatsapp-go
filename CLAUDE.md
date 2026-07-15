@@ -138,4 +138,4 @@ Whenever implementing a feature, prioritize working software over perfect archit
 Build a lightweight WhatsApp Gateway in Go using WhatsMeow. The server acts as a programmable WhatsApp client for one personal account, exposing REST APIs to send and receive messages of various types (text, images, videos, audio, documents, stickers). The focus is simplicity and working software, not enterprise architecture. -->
 
 ## Comments
-Only comments with the complex business logic
+Use comments sparingly. Only comment complex code where the logic isn't self-evident. Prefer clear variable names and simple logic over explanatory comments.

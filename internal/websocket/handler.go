@@ -7,9 +7,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// upgrader performs the HTTP -> WebSocket handshake. The default CheckOrigin
-// enforces same-origin; to allow a browser served from another origin, set a
-// custom CheckOrigin, e.g. func(r *http.Request) bool { return r.Header.Get("Origin") == "https://app.example.com" }.
 var upgrader = websocket.Upgrader{}
 
 type Handler struct {
@@ -20,11 +17,7 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-// Stream upgrades the request, registers the client on the hub and blocks
-// delivering broadcasts until the client disconnects.
 func (h *Handler) Stream(c *gin.Context) {
-	// Upgrade writes the 101 response (or an error response) itself; on failure
-	// there is nothing left to do.
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		return
