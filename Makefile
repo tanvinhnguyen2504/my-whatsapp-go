@@ -46,15 +46,15 @@ logs:
 docker-build:
 	docker build -t my-whatsapp .
 
-## docker-run: run the production image (http://localhost:8082)
+## docker-run: run the production image (http://localhost:8888)
 docker-run:
-	docker run --rm --env-file .env -p 8082:8082 -v whatsmeow-data:/app/data my-whatsapp
+	docker run --rm --env-file .env -p 8888:8888 -v whatsmeow-data:/app/data my-whatsapp
 
 # ---- housekeeping ----
 
-## qr: fetch the current login QR from a running server (PORT=8082 by default)
+## qr: fetch the current login QR from a running server (PORT=8888 by default)
 qr:
-	@curl -s localhost:$${PORT:-8082}/qr
+	@curl -s localhost:$${PORT:-8888}/qr
 
 ## db-reset: drop & recreate the Postgres schema (DB_SCHEMA from .env) so whatsmeow rebuilds its tables
 db-reset:

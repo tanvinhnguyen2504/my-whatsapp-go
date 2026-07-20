@@ -33,7 +33,7 @@ Loaded from `.env` (via `godotenv`) then the environment. `validate()` fails fas
 | Env | Default | Used by |
 |-----|---------|---------|
 | `MODE` | `development` | general |
-| `HTTP_PORT` | `8082` | HTTP server |
+| `HTTP_PORT` | `8888` | HTTP server |
 | `WHATSAPP_PROVIDER` | `api` | provider selection |
 | `DB_HOST` `DB_PORT` `DB_USER` `DB_PASS` `DB_NAME` `DB_SCHEMA` | port `5432` | WhatsMeow Postgres store |
 | `WHATSAPP_BUSINESS_PHONE_NUMBER_ID` `WHATSAPP_BUSINESS_ACCESS_TOKEN` `WHATSAPP_BUSINESS_API_VERSION` | version `v21.0` | Graph Cloud API |

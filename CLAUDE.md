@@ -31,7 +31,7 @@ go vet ./... && gofmt -l .   # vet + formatting check
 go test ./...           # run all tests (none yet)
 
 docker compose up       # dev with hot reload (Air rebuilds on .go changes)
-docker build -t my-whatsapp . && docker run --env-file .env -p 8082:8082 my-whatsapp  # prod
+docker build -t my-whatsapp . && docker run --env-file .env -p 8888:8888 my-whatsapp  # prod
 ```
 
 ### HTTP endpoints
@@ -45,7 +45,7 @@ Configuration is loaded from `.env` (via `internal/config`); see `.env.example` 
 full template. Loading fails fast if the selected provider is misconfigured.
 
 - `MODE` — development | production
-- `HTTP_PORT` — server port (default `8082`)
+- `HTTP_PORT` — server port (default `8888`)
 - `WHATSAPP_PROVIDER` — `api` (Meta Cloud API) or `business` (WhatsMeow)
 - `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASS` / `DB_NAME` — PostgreSQL session store,
   **required by the `business` workflow** (`DB_HOST`, `DB_USER`, `DB_NAME` must be set)

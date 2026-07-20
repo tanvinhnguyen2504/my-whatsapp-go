@@ -28,6 +28,13 @@ type Database struct {
 	SSLEnabled bool
 }
 
+type GoogleCloud struct {
+	ProjectID  string
+	BucketName string
+	SubTopicID string
+	TopicID    string
+}
+
 func (d Database) DSN() string {
 	sslMode := "disable"
 	if d.SSLEnabled {
@@ -65,9 +72,8 @@ type Config struct {
 	// Webhook (used by the api workflow's verification handshake).
 	WebhookVerifyToken string
 
-	// Google Cloud Storage (media uploads).
-	GoogleCloudProjectID  string
-	GoogleCloudBucketName string
+	// Google Cloud config
+	GoogleCloud GoogleCloud
 }
 
 func Load() (Config, error) {
@@ -75,7 +81,7 @@ func Load() (Config, error) {
 
 	cfg := Config{
 		Mode:     env("MODE", "development"),
-		HTTPPort: env("HTTP_PORT", "8082"),
+		HTTPPort: env("HTTP_PORT", "8888"),
 		Provider: env("WHATSAPP_PROVIDER", ProviderAPI),
 		Database: Database{
 			Host:       env("DB_HOST", "localhost"),
@@ -89,8 +95,12 @@ func Load() (Config, error) {
 		BusinessAccessToken:   os.Getenv("WHATSAPP_BUSINESS_ACCESS_TOKEN"),
 		BusinessAPIVersion:    env("WHATSAPP_BUSINESS_API_VERSION", "v21.0"),
 		WebhookVerifyToken:    os.Getenv("WHATSAPP_API_WEBHOOK_VERIFY_TOKEN"),
-		GoogleCloudProjectID:  env("STORAGE_PROJECT_ID", ""),
-		GoogleCloudBucketName: env("STORAGE_BUCKET_NAME", ""),
+		GoogleCloud: GoogleCloud{
+			ProjectID:  env("GOOGLE_PROJECT_ID", ""),
+			BucketName: env("GOOGLE_BUCKET_NAME", ""),
+			TopicID:    env("GOOGLE_PUB_SUB_TOPIC_ID", ""),
+			SubTopicID: env("GOOGLE_PUB_SUB_SUB_ID", ""),
+		},
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -114,20 +124,6 @@ func (c Config) validate() error {
 	}
 	return nil
 }
-
-// func (c Config) WhatsmeowConnectionString() string {
-// 	schema := "whatsmeow"
-
-// 	return fmt.Sprintf("user=%s password=%s dbname=%s host=%s port=%d sslmode=%s search_path=%s",
-// 		c.Database.User,
-// 		c.Database.Pass,
-// 		c.Database.Name,
-// 		c.Database.Host,
-// 		c.Database.Port,
-// 		c.Database.SSLEnabled,
-// 		schema,
-// 	)
-// }
 
 func env(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {

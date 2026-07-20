@@ -11,5 +11,12 @@ server
 
 # Secrets
 .env
+.env.*
+!.env.example
+key.json
+*-key.json
+*service-account*.json
 
 */node_modules
+*received_media
+*pubsub

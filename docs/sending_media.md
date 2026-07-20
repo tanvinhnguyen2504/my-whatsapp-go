@@ -24,15 +24,15 @@ POST /messages/media          Content-Type: multipart/form-data
 
 ```bash
 # photo with caption
-curl -F to=14088255555 -F caption=hi -F file=@photo.jpg   http://localhost:8082/messages/media
+curl -F to=14088255555 -F caption=hi -F file=@photo.jpg   http://localhost:8888/messages/media
 # video
-curl -F to=14088255555 -F file=@clip.mp4                  http://localhost:8082/messages/media
+curl -F to=14088255555 -F file=@clip.mp4                  http://localhost:8888/messages/media
 # audio
-curl -F to=14088255555 -F file=@note.ogg                  http://localhost:8082/messages/media
+curl -F to=14088255555 -F file=@note.ogg                  http://localhost:8888/messages/media
 # PDF (auto-classified as a document, keeps the filename)
-curl -F to=14088255555 -F file=@invoice.pdf               http://localhost:8082/messages/media
+curl -F to=14088255555 -F file=@invoice.pdf               http://localhost:8888/messages/media
 # sticker (WebP; kind must be explicit)
-curl -F to=14088255555 -F kind=sticker -F file=@sticker.webp http://localhost:8082/messages/media
+curl -F to=14088255555 -F kind=sticker -F file=@sticker.webp http://localhost:8888/messages/media
 ```
 
 ## How it works

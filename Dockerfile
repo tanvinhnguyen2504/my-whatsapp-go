@@ -16,6 +16,6 @@ RUN chown -R app:app /app
 USER app
 
 # Session state lives in PostgreSQL; supply DB_HOST/DB_USER/DB_NAME (and DB_PASS) at runtime.
-ENV HTTP_PORT=8082
-EXPOSE 8082
+ENV HTTP_PORT=8888
+EXPOSE 8888
 ENTRYPOINT ["/app/server"]

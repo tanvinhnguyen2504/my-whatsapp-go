@@ -19,21 +19,21 @@ For the `api` workflow, fetch the login QR after startup and scan it from
 WhatsApp → Linked devices:
 
 ```bash
-curl -s localhost:8082/qr
+curl -s localhost:8888/qr
 ```
 
 ## Run with Docker
 
 ```bash
 docker compose up         # dev: hot reload via Air on every .go change
-# app is exposed on http://localhost:8082
+# app is exposed on http://localhost:8888
 ```
 
 Production image (static binary, no CGO):
 
 ```bash
 docker build -t my-whatsapp .
-docker run --env-file .env -p 8082:8082 -v whatsmeow-data:/app/data my-whatsapp
+docker run --env-file .env -p 8888:8888 -v whatsmeow-data:/app/data my-whatsapp
 ```
 
 ## Endpoints

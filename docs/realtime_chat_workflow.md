@@ -120,7 +120,7 @@ updates.
 ## Frontend (`frontend/`)
 
 - `vite.config.ts` — dev proxy: `/ws` (with `ws: true`, also covers `/ws/history/*`) and
-  `/messages` → `http://localhost:8082`. The browser is therefore **same-origin** with the
+  `/messages` → `http://localhost:8888`. The browser is therefore **same-origin** with the
   API, so the WebSocket same-origin check passes and **no CORS** setup is needed.
 - `src/useWebSocket.ts` — single `/ws` connection, exposes status, auto-reconnects, and cleans
   up on unmount (safe under React 18 StrictMode double-invoke).
@@ -133,7 +133,7 @@ updates.
 ```bash
 # 1. Backend (needs PostgreSQL; provider need not be logged in for the WS/receive test)
 go run ./cmd
-# or the hot-reload container: docker compose up   (serves :8082, rebuilds on .go changes)
+# or the hot-reload container: docker compose up   (serves :8888, rebuilds on .go changes)
 
 # 2. Frontend
 cd frontend && npm install && npm run dev      # http://localhost:5173
@@ -143,11 +143,11 @@ cd frontend && npm install && npm run dev      # http://localhost:5173
 
 ```bash
 # Receive path without a live WhatsApp inbound — inject a message and watch it broadcast:
-curl -X POST localhost:8082/ws/publish -H 'Content-Type: application/json' \
+curl -X POST localhost:8888/ws/publish -H 'Content-Type: application/json' \
   -d '{"id":"t1","chat_jid":"84900000000@s.whatsapp.net","sender_jid":"84900000000@s.whatsapp.net","kind":"text","body":"hello","timestamp":"2026-07-11T10:00:00Z"}'
 
 # Confirm persistence:
-curl 'localhost:8082/ws/history/84900000000@s.whatsapp.net'
+curl 'localhost:8888/ws/history/84900000000@s.whatsapp.net'
 ```
 
 In the UI, set **To** = `84900000000`; the injected message appears live and in history. Real
